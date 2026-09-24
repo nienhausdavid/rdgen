@@ -493,6 +493,52 @@ jobs:
           sed -i '/ic_launcher_background/d' ./flutter/android/app/src/main/res/values/colors.xml
       ##########################################################
 
+      # --- Nienhaus-IT customization (not upstream rdgen) ---
+      # GPL-3.0 §6 corresponding-source archive: the sed patches above are applied
+      # to an ephemeral checkout of rustdesk/rustdesk and are never committed anywhere
+      # by upstream rdgen. To keep the effective, distributable source available for
+      # any APK we hand to a customer, we archive the exact diff against the pristine
+      # upstream checkout into this fork's own git history. Runs once per build (only
+      # on the aarch64 matrix leg, since all three ABIs get identical source patches).
+      - name: Save effective source patch (GPL-3.0 corresponding-source archive)
+        if: matrix.job.arch == 'aarch64'
+        continue-on-error: true
+        shell: bash
+        run: |
+          git diff > "${{ runner.temp }}/effective-patch.diff"
+          echo "Patch lines: $(wc -l < "${{ runner.temp }}/effective-patch.diff")"
+
+      - name: Checkout fork repo to archive patch
+        if: matrix.job.arch == 'aarch64'
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          path: rdgen-fork-for-patch
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit and push effective patch
+        if: matrix.job.arch == 'aarch64'
+        continue-on-error: true
+        shell: bash
+        run: |
+          cd rdgen-fork-for-patch
+          mkdir -p patches
+          DATE=$(date -u +%Y%m%d-%H%M%S)
+          SAFE_APPID=$(echo "${{ env.androidappid }}" | tr -c 'A-Za-z0-9._-' '_')
+          FILE="patches/android-${{ env.VERSION }}-${SAFE_APPID}-${DATE}-run${{ github.run_id }}.diff"
+          cp "${{ runner.temp }}/effective-patch.diff" "$FILE"
+          git config user.name "rdgen-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "No changes to commit (empty patch), skipping."
+          else
+            git commit -m "GPL-3.0 source archive: android ${{ env.VERSION }} (${{ env.appname }}), run ${{ github.run_id }}"
+            git push
+          fi
+      # --- end Nienhaus-IT customization ---
+
       - name: Build rustdesk lib
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
